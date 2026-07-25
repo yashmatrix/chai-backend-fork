@@ -9,17 +9,128 @@ import {uploadOnCloudinary} from "../utils/cloudinary.js"
 
 const getAllVideos = asyncHandler(async (req, res) => {
     const { page = 1, limit = 10, query, sortBy, sortType, userId } = req.query
-    //TODO: get all videos based on query, sort, pagination
+
+    const pipeline = []
+
+    // Match stage: filter by search query and/or userId
+    const matchStage = {}
+
+    if (query) {
+        matchStage.$or = [
+            { title: { $regex: query, $options: "i" } },
+            { description: { $regex: query, $options: "i" } }
+        ]
+    }
+
+    if (userId) {
+        if (!isValidObjectId(userId)) {
+            throw new ApiError(400, "Invalid userId")
+        }
+        matchStage.owner = new mongoose.Types.ObjectId(userId)
+    }
+
+    // Only return published videos
+    matchStage.isPublished = true
+
+    pipeline.push({ $match: matchStage })
+
+    // Sort stage
+    if (sortBy) {
+        const sort = {}
+        sort[sortBy] = sortType === "asc" ? 1 : -1
+        pipeline.push({ $sort: sort })
+    } else {
+        pipeline.push({ $sort: { createdAt: -1 } })
+    }
+
+    // Lookup owner details
+    pipeline.push(
+        {
+            $lookup: {
+                from: "users",
+                localField: "owner",
+                foreignField: "_id",
+                as: "ownerDetails",
+                pipeline: [
+                    {
+                        $project: {
+                            username: 1,
+                            avatar: 1
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            $unwind: "$ownerDetails"
+        }
+    )
+
+    const videoAggregate = Video.aggregate(pipeline)
+
+    const options = {
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10)
+    }
+
+    const result = await Video.aggregatePaginate(videoAggregate, options)
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, result, "Videos fetched successfully"))
 })
 
 const publishAVideo = asyncHandler(async (req, res) => {
     const { title, description} = req.body
     // TODO: get video, upload to cloudinary, create video
+    if ([title, description].some((field) => !field || field?.trim() === "")){
+        throw new ApiError(400, 'All fields are required')
+    }
+
+    const videoLocalPath = req.files?.videoFile?.[0]?.path
+    const thumbnailLocalPath = req.files?.thumbnail?.[0]?.path
+    
+    const [video, thumbnail] = await Promise.all([
+        uploadOnCloudinary(videoLocalPath),
+        uploadOnCloudinary(thumbnailLocalPath)
+    ])
+
+    if (!thumbnailLocalPath) {
+        throw new ApiError(400, "Thumbnail is missing")
+    }
+
+    if (!videoLocalPath) {
+        throw new ApiError(400, "Video File is missing")
+    }
+
+    if (!video) {
+        throw new ApiError(400, "Error while uploading video")
+    }
+    if (!thumbnail) {
+        throw new ApiError(400, "Error while uploading thumbnail")
+    }
+
+    const owner = req.user._id
+    
+    const vid = await Video.create({
+        videoFile: video.url,
+        thumbnail: thumbnail.url,
+        title,
+        description,
+        duration: video.duration,
+        owner: owner
+    })
+
+    return res
+        .status(201)
+        .json(new ApiResponse(201, vid, "Video uploaded successfully"))
+
 })
 
 const getVideoById = asyncHandler(async (req, res) => {
     const { videoId } = req.params
     //TODO: get video by id
+    
 })
 
 const updateVideo = asyncHandler(async (req, res) => {
