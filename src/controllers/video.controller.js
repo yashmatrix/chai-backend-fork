@@ -4,7 +4,8 @@ import {User} from "../models/user.model.js"
 import {ApiError} from "../utils/ApiError.js"
 import {ApiResponse} from "../utils/ApiResponse.js"
 import {asyncHandler} from "../utils/asyncHandler.js"
-import {uploadOnCloudinary} from "../utils/cloudinary.js"
+import {uploadOnCloudinary, deleteFromCloudinary} from "../utils/cloudinary.js"
+import { deleteTweet } from "./tweet.controller.js"
 
 
 const getAllVideos = asyncHandler(async (req, res) => {
@@ -194,17 +195,73 @@ const updateVideo = asyncHandler(async (req, res) => {
 
     return res
         .status(200)
-        .json(new ApiResponse(200, video, "Video updated successfully"))
+        .json(new ApiResponse(200, updatedVideo, "Video updated successfully"))
 
 })
 
 const deleteVideo = asyncHandler(async (req, res) => {
     const { videoId } = req.params
     //TODO: delete video
+
+    if (!isValidObjectId(videoId)) {
+            throw new ApiError(400, "Invalid video ID")
+        }
+    
+    
+    
+    const video = await Video.findById(videoId)
+
+    if(!video) {
+        throw new ApiError(404, "Video Not Found")
+    }
+
+
+    if (video.owner.toString() !== req.user._id.toString()) {
+        throw new ApiError(403, "Unauthorized access")
+    }
+
+    await deleteFromCloudinary(video.videoFile, "video")
+    await deleteFromCloudinary(video.thumbnail)
+
+    const deletedVideo = await Video.findByIdAndDelete(videoId)
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, deletedVideo, "Video deleted successfully"))
 })
 
 const togglePublishStatus = asyncHandler(async (req, res) => {
     const { videoId } = req.params
+
+    if (!isValidObjectId(videoId)) {
+            throw new ApiError(400, "Invalid video ID")
+        }
+    
+    
+    
+    const video = await Video.findById(videoId)
+
+    if(!video) {
+        throw new ApiError(404, "Video Not Found")
+    }
+
+    if (video.owner.toString() !== req.user._id.toString()) {
+        throw new ApiError(403, "Unauthorized access")
+    }
+
+    video.isPublished = !video.isPublished
+    await video.save()
+
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(
+                200, 
+                video,
+                `Video ${video.isPublished ? "Published" : "Unpublished"} Successfully`
+            )
+        )
+
 })
 
 export {
