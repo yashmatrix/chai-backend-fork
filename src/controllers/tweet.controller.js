@@ -10,7 +10,7 @@ const createTweet = asyncHandler(async (req, res) => {
     const { content } = req.body
     
     if (!content?.trim()) {
-        throw new ApiError(400, "Tweeet content not found")
+        throw new ApiError(400, "Tweet content not found")
     }
 
     const owner = req.user._id
